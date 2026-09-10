@@ -61,9 +61,11 @@ int main(void)
         }
 
         // put input in pieces with strsep
+
         // returns a pointer to the token
 
         // batch mode
+
         // if end-of-file marker: exit(0);
 
         return 0;
