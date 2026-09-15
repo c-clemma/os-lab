@@ -5,69 +5,86 @@
 #include <string.h>
 #include <sys/types.h>
 #include <sys/wait.h>
-#include <unistd.h>
+
+int tokenizer(char *buffer, char *args[], int max_args)
+{
+    int arg_count = 0;
+
+    char *cursor = buffer;
+    char *token;
+
+    while ((token = strsep(&cursor, " \t\n")) != NULL)
+    {
+        // " "
+        if (strlen(token) == 0)
+        {
+            continue;
+        }
+        args[arg_count] = token;
+        arg_count++;
+    }
+
+    args[arg_count] = NULL;
+    return arg_count;
+}
+
+void exec_command(char *args[])
+{
+    int rc = fork();
+    if (rc < 0)
+    {
+        // fork failed: exit
+        fprintf(stderr, "fork failed\n");
+        exit(1);
+    }
+    else if (rc == 0)
+    {
+        // child (new process)
+        // printf("hello, I am child that will execute that command '%s' in the future\n", token);
+        // TODO get_path();
+        execv("/usr/bin/ls", args);
+        exit(1);
+    }
+    else
+    {
+        // printf("Child process finsihed\n");
+        waitpid(rc, NULL, 0);
+    }
+}
 
 int main(void)
 {
+    char *buffer = NULL;
+    size_t bufsize = 0;
+
     while (true)
     {
         printf("wish> ");
 
-        char *buffer;
-        size_t bufsize = 32;
-        // size_t characters;
-
-        char *token;
-
-        // expalin this line of code, i dont know yet
-        buffer = (char *)malloc(bufsize * sizeof(char));
-
-        if (buffer == NULL)
-        {
-            perror("Unable to allocate buffer");
-            exit(1);
-        }
-
         // printf("Type something: ");
-        getline(&buffer, &bufsize, stdin);
+        ssize_t characters = getline(&buffer, &bufsize, stdin);
         // printf("%zu characters were read.\n", characters);
-        printf("You typed: %s\n", buffer);
+        // printf("You typed: %s\n", buffer);
 
-        for (unsigned int j = 1; (token = strsep(&buffer, " ")); j++)
+        // if end-of-file marker : exit(0);
+        if (characters == -1)
         {
-            printf("%s\n", token);
-
-            // somehow needs to identify what is a comand, what is an argument
-
-            int rc = fork();
-            if (rc < 0)
-            {
-                // fork failed; exit
-                fprintf(stderr, "fork failed\n");
-                exit(1);
-            }
-            else if (rc == 0)
-            {
-                char *args[] = {"ls", NULL};
-                // child (new process)
-                printf("hello, I am child that will execute that command '%s' in the future\n", token);
-                execv("/usr/bin/ls", args);
-            }
-            else
-            {
-                wait(NULL);
-                printf("Child process finsihed\n");
-            }
+            free(buffer);
+            exit(0);
         }
 
-        // put input in pieces with strsep
+        char *args[100];
 
-        // returns a pointer to the token
+        int arg_count = tokenizer(buffer, args, 100);
+
+        // empty command
+        if (arg_count == 0)
+        {
+            continue;
+        }
+
+        exec_command(args);
 
         // batch mode
-
-        // if end-of-file marker: exit(0);
-
-        return 0;
     }
 }
