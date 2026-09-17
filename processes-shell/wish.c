@@ -18,7 +18,7 @@ void error()
 
 int tokenizer(char *buffer, char *args[], int max_args)
 {
-    // TODO: add "<" and "&" as separators
+    // TODO: add ">" and "&" as separators
     int arg_count = 0;
 
     char *cursor = buffer; // start at beginning before going to next separator
@@ -149,7 +149,7 @@ void exec_command(char *args[], int arg_count)
         if (command == NULL)
         {
             error();
-            exit(1); // the child need to be stopped
+            _exit(1); // the child need to be stopped
         }
         execv(command, args);
         exit(1);
@@ -165,29 +165,35 @@ void exec_command(char *args[], int arg_count)
 
 int main(int argc, char *argv[])
 {
-    path = malloc(2 * sizeof(char *));
+    path = malloc(sizeof(char *));
     path[0] = "/bin";
     // path[1] = "/bin/usr";
-    path_count = 2;
+    path_count = 1;
 
     // cause getline allocates memory dynamically
     char *buffer = NULL;
     size_t bufsize = 0;
 
-    if (argv[1]!=NULL )
+    if (argc > 2)
+    {
+        error();
+        exit(1);
+    }
+    if (argv[1] != NULL)
     {
         FILE *fptr;
         fptr = fopen(argv[1], "r");
-        if (argv[2] !=NULL || fptr==NULL)
+        if (fptr==NULL)
         {
+            error();
             exit(1);
         }
         // TODO: should be a function as it is almost the same
-        ssize_t characters = getline(&buffer, &bufsize, fptr);
-        while (characters!=-1)  // until EOF
+        for (ssize_t characters = getline(&buffer, &bufsize, fptr); characters!=-1; characters = getline(&buffer, &bufsize, fptr))
         {
             // printf("%zu characters were read.\n", characters);
             // printf("Command line:\n%s", buffer);
+            // printf("hello world (pid:%d)\n", (int) getpid());
             char *args[100]; // array 100 elements, that each are a pointer to a char
             int arg_count = tokenizer(buffer, args, 100); // amount of tokens
             // printf("%d number of arguments\n",arg_count);
@@ -198,11 +204,11 @@ int main(int argc, char *argv[])
                 if (!checkbuildin(args, arg_count))
                 {
                     // TODO: get working execution
-                    // exec_command(args, arg_count);
+                    exec_command(args, arg_count);
                 }
             }
 
-            characters = getline(&buffer, &bufsize, fptr);
+            // characters = getline(&buffer, &bufsize, fptr);
             // printf("\n\n");
         }
         free(buffer);
