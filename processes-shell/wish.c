@@ -18,6 +18,7 @@ void error()
 
 int tokenizer(char *buffer, char *args[], int max_args)
 {
+    // TODO: add "<" and "&" as separators
     int arg_count = 0;
 
     char *cursor = buffer; // start at beginning before going to next separator
@@ -166,24 +167,27 @@ int main(int argc, char *argv[])
 {
     path = malloc(2 * sizeof(char *));
     path[0] = "/bin";
-    path[1] = "/bin/usr";
+    // path[1] = "/bin/usr";
     path_count = 2;
 
     // cause getline allocates memory dynamically
     char *buffer = NULL;
     size_t bufsize = 0;
 
-    FILE *fptr;
-    fptr = fopen(argv[1], "r");
-    // char data[100];
-    if (fptr != NULL) //Batch mode
+    if (argv[1]!=NULL )
     {
+        FILE *fptr;
+        fptr = fopen(argv[1], "r");
+        if (argv[2] !=NULL || fptr==NULL)
+        {
+            exit(1);
+        }
         // TODO: should be a function as it is almost the same
         ssize_t characters = getline(&buffer, &bufsize, fptr);
         while (characters!=-1)  // until EOF
         {
             // printf("%zu characters were read.\n", characters);
-            // printf("You typed:\n%s", buffer);
+            // printf("Command line:\n%s", buffer);
             char *args[100]; // array 100 elements, that each are a pointer to a char
             int arg_count = tokenizer(buffer, args, 100); // amount of tokens
             // printf("%d number of arguments\n",arg_count);
@@ -203,6 +207,7 @@ int main(int argc, char *argv[])
         }
         free(buffer);
         fclose(fptr);
+
     }
     else // Normal mode
     {
