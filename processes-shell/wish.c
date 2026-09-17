@@ -6,6 +6,16 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 
+char **path = NULL;
+int path_count = 0;
+// path count
+void error()
+{
+    char error_message[30] = "An error has occurred\n";
+    write(STDERR_FILENO, error_message, strlen(error_message));
+}
+// char *path[100];
+
 int tokenizer(char *buffer, char *args[], int max_args)
 {
     int arg_count = 0;
@@ -28,10 +38,23 @@ int tokenizer(char *buffer, char *args[], int max_args)
     return arg_count;
 }
 
-char *search_path(char *command)
+char *search_path(char *command, int arg_count)
 {
-    char *path = malloc(100);
-    strcpy(path, "/bin/");
+
+    for (int i = 0; i < path_count; i++)
+    {
+        size_t size = strlen(path[i]) + strlen(command) + 2;
+        char *buffer = malloc(size);
+        snprintf(buffer, size, "%s/%s", path[i], command);
+        // char path_exec = path[i] +command;
+        if (access(buffer, X_OK) == 0)
+        {
+            return buffer;
+        }
+        free(buffer);
+    }
+
+    /* strcpy(path, "/bin/");
     strcat(path, command);
     if (access(path, X_OK) == 0)
     {
@@ -43,14 +66,65 @@ char *search_path(char *command)
     if (access(path, X_OK) == 0)
     {
         return path;
-    }
-    free(path);
+    } */
     return NULL;
+}
+
+bool checkbuildin(char *args[], int arg_count)
+{
+
+    if (strcmp("exit", args[0]) == 0)
+    {
+        if (arg_count == 1)
+        {
+            exit(0);
+        }
+        else
+        {
+            // error here
+            error();
+            return true;
+        }
+    }
+
+    if (strcmp("cd", args[0]) == 0)
+    {
+        if (arg_count == 2)
+        {
+            if (chdir(args[1]) != 0)
+            {
+                error();
+            }
+        }
+        else
+        {
+            error();
+        }
+        return true;
+    }
+
+    if (strcmp("path", args[0]) == 0)
+    {
+
+        // clear path completly TODO and malloc with size i need
+        path_count = arg_count - 1;
+        path = malloc(path_count * sizeof(char *));
+
+        for (int i = 0; i < path_count; i++)
+        {
+            path[i] = strdup(args[i + 1]);
+        }
+
+        return true;
+        // error here
+        // perror("wrong amount of arguments");
+    }
+    return false;
 }
 
 // printf("%s\n", path);
 
-void exec_command(char *args[])
+void exec_command(char *args[], int arg_count)
 {
     int rc = fork();
     if (rc < 0)
@@ -66,10 +140,14 @@ void exec_command(char *args[])
         // TODO get_path();
         // exec(args[0], args)
         // path: need to add args[0];
-        char *command = search_path(args[0]);
+        // check if exit
+        // check if path
+        // check if cd
+        // checkbuildin(args, arg_count);
+        char *command = search_path(args[0], arg_count);
         if (command == NULL)
         {
-            fprintf(stderr, "Command not found\n");
+            error();
             return;
         }
         execv(command, args);
@@ -84,6 +162,11 @@ void exec_command(char *args[])
 
 int main(void)
 {
+    path = malloc(2 * sizeof(char *));
+    path[0] = "/bin";
+    path[1] = "/bin/usr";
+    path_count = 2;
+
     // cause getline allocates memory dynamically
     char *buffer = NULL;
     size_t bufsize = 0;
@@ -116,7 +199,13 @@ int main(void)
             continue;
         }
 
-        exec_command(args);
+        if (checkbuildin(args, arg_count))
+        {
+            continue;
+#
+        }
+
+        exec_command(args, arg_count);
 
         // batch mode
     }
