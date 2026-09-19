@@ -5,20 +5,31 @@
 #include <string.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <fcntl.h>
 
 char **path = NULL;
 int path_count = 0;
-// path count
+
+/**
+ * Prints the standard shell error message to stderr.
+ */
 void error()
 {
     char error_message[30] = "An error has occurred\n";
     write(STDERR_FILENO, error_message, strlen(error_message));
 }
-// char *path[100];
 
+
+/**
+ * Splits the input buffer into individual arguments.
+ *
+ * @param buffer   The input string to tokenize.
+ * @param args     Array where the resulting arguments are stored.
+ * @param max_args Maximum number of arguments.
+ * @return The number of arguments found.
+ */
 int tokenizer(char *buffer, char *args[], int max_args)
 {
-    // TODO: add ">" and "&" as separators
     int arg_count = 0;
 
     char *cursor = buffer; // start at beginning before going to next separator
@@ -39,6 +50,51 @@ int tokenizer(char *buffer, char *args[], int max_args)
     return arg_count;
 }
 
+
+int redirectioner (char *buffer, char *args[], int max_args, char **outputfile)
+{
+    char *cursor = buffer;
+    char *left = strsep(&cursor, ">"); //left side of >
+    char *right = cursor; // right side of >
+    if (right == NULL) //right is empty
+    {
+        *outputfile = NULL;
+        return tokenizer(left,args,max_args);
+    }
+    if (strchr(right,'>')) // right have more '>'
+    {
+        error();
+        return 0;
+    }
+
+    int r_tokens = tokenizer(right,args,max_args);
+    if (r_tokens==1)
+    {
+        *outputfile = args[0];
+    }
+    else // wrong right side
+    {
+        error();
+        return 0;
+    }
+
+    int l_tokens = tokenizer(left,args,max_args);
+    if (l_tokens == 0) // empty left side
+    {
+        error();
+        return 0;
+    }
+    return l_tokens;
+}
+
+
+/**
+ * Searches for a command in the configured paths.
+ *
+ * @param command The command to search for.
+ * @return The full path to the executable if found,
+ *         otherwise NULL.
+ */
 char *search_path(char *command, int arg_count)
 {
 
@@ -54,26 +110,23 @@ char *search_path(char *command, int arg_count)
         }
         free(buffer);
     }
-
-    /* strcpy(path, "/bin/");
-    strcat(path, command);
-    if (access(path, X_OK) == 0)
-    {
-        return path;
-    }
-    strcpy(path, "/bin/usr");
-    strcat(path, command);
-
-    if (access(path, X_OK) == 0)
-    {
-        return path;
-    } */
     return NULL;
 }
 
+
+/**
+ * Checks whether the entered command is a built-in shell command.
+ *
+ * Handles the built-in commands "exit", "cd", and "path".
+ * If a built-in command is found, it is executed directly.
+ *
+ * @param args Array containing the command and its arguments.
+ * @param arg_count Number of arguments in args.
+ * @return true if the command was a built-in command,
+ *         false otherwise.
+ */
 bool checkbuildin(char *args[], int arg_count)
 {
-
     if (strcmp("exit", args[0]) == 0)
     {
         if (arg_count == 1)
@@ -106,7 +159,6 @@ bool checkbuildin(char *args[], int arg_count)
 
     if (strcmp("path", args[0]) == 0)
     {
-
         // clear path completly TODO and malloc with size i need
         path_count = arg_count - 1;
         path = malloc(path_count * sizeof(char *));
@@ -117,15 +169,18 @@ bool checkbuildin(char *args[], int arg_count)
         }
 
         return true;
-        // error here
-        // perror("wrong amount of arguments");
     }
     return false;
 }
 
-// printf("%s\n", path);
 
-void exec_command(char *args[], int arg_count)
+/**
+ * Executes a command using fork() and execv().
+ *
+ * @param args array containing
+ *             the command and its arguments.
+ */
+int exec_command(char *args[], int arg_count, char *outputfile)
 {
     int rc = fork();
     if (rc < 0)
@@ -137,119 +192,110 @@ void exec_command(char *args[], int arg_count)
     else if (rc == 0)
     {
         // child (new process)
-        // printf("hello, I am child that will execute that command '%s' in the future\n", token);
-        // TODO get_path();
-        // exec(args[0], args)
-        // path: need to add args[0];
-        // check if exit
-        // check if path
-        // check if cd
-        // checkbuildin(args, arg_count);
         char *command = search_path(args[0], arg_count);
+        if (outputfile!= NULL)
+        {
+            // set return to output file
+            close(STDOUT_FILENO);
+            int fd = open(outputfile, O_CREAT|O_WRONLY|O_TRUNC, 0644);
+            dup2(STDOUT_FILENO, STDERR_FILENO);
+            if (fd<0)
+            {
+                error();
+                _exit(1);
+            }
+        }
         if (command == NULL)
         {
             error();
             _exit(1); // the child need to be stopped
         }
         execv(command, args);
-        exit(1);
+        error();
+        _exit(1);
     }
-    else
-    {
-        // printf("Child process finsihed\n");
-        waitpid(rc, NULL, 0);
-    }
+    return rc;
 }
 
+
+//helper function to merge checkbuildin and exec_command
+int execute_line(char *buffer)
+{
+    char *args[100];
+    char *outfile;
+    int max_args = 100;
+    int arg_count = redirectioner(buffer, args, max_args,&outfile); // amount of tokens
+    if (arg_count > 0)
+    {
+        if (!checkbuildin(args, arg_count))
+        {
+            int rc = exec_command(args, arg_count,outfile);
+            return rc;
+        }
+    }
+    return 0;
+}
+
+
+// separate commands by & and calls function to execute them
+void parallelize (char *buffer)
+{
+    int pids[100];
+    int n = 0;
+    char *cursor = buffer;
+    char *token;
+
+    while ((token = strsep(&cursor, "&")) != NULL)
+    {
+        int pid = execute_line(token);
+        if (pid>0)
+            pids[n++] = pid;
+    }
+    for (int i=0; i<n; i++)
+    {
+        waitpid(pids[i],NULL,0);
+    }
+}
 
 
 int main(int argc, char *argv[])
 {
     path = malloc(sizeof(char *));
     path[0] = "/bin";
-    // path[1] = "/bin/usr";
     path_count = 1;
 
     // cause getline allocates memory dynamically
     char *buffer = NULL;
     size_t bufsize = 0;
 
-    if (argc > 2)
+
+    if (argc > 2) // check for too many arguments
     {
         error();
         exit(1);
     }
-    if (argv[1] != NULL)
+    if (argv[1] != NULL) // Batch mode
     {
         FILE *fptr;
         fptr = fopen(argv[1], "r");
-        if (fptr==NULL)
+        if (fptr==NULL) // file could not be open
         {
             error();
             exit(1);
         }
-        // TODO: should be a function as it is almost the same
         for (ssize_t characters = getline(&buffer, &bufsize, fptr); characters!=-1; characters = getline(&buffer, &bufsize, fptr))
         {
-            // printf("%zu characters were read.\n", characters);
-            // printf("Command line:\n%s", buffer);
-            // printf("hello world (pid:%d)\n", (int) getpid());
-            char *args[100]; // array 100 elements, that each are a pointer to a char
-            int arg_count = tokenizer(buffer, args, 100); // amount of tokens
-            // printf("%d number of arguments\n",arg_count);
-
-            if (arg_count !=0)
-            {
-                // printf("Executing %p\n",args);
-                if (!checkbuildin(args, arg_count))
-                {
-                    // TODO: get working execution
-                    exec_command(args, arg_count);
-                }
-            }
-
-            // characters = getline(&buffer, &bufsize, fptr);
-            // printf("\n\n");
+            parallelize(buffer);
         }
         free(buffer);
         fclose(fptr);
-
     }
     else // Normal mode
     {
-        while (true)
+        for (ssize_t characters = getline(&buffer, &bufsize,stdin); characters!=-1; characters = getline(&buffer, &bufsize, stdin))
         {
             printf("wish> ");
-
-            // printf("Type something: ");
-            ssize_t characters = getline(&buffer, &bufsize, stdin);
-            // printf("%zu characters were read.\n", characters);
-            // printf("You typed: %s\n", buffer);
-
-            // if end-of-file marker : exit(0);
-            // EOF = a signal or condition that tells a computer program no more data remains in a file or input stream
-            // fail or eof the getline() retruns -1
-            if (characters == -1)
-            {
-                free(buffer); // free the memory after all (see man page)
-                exit(0);
-            }
-
-            char *args[100]; // array 100 elements, that each are a pointer to a char
-            // to split in tokens, need: buffer, args and the limit of 100
-            int arg_count = tokenizer(buffer, args, 100); // amount of tokens
-
-            // empty command
-            if (arg_count == 0)
-            {
-                continue;
-            }
-
-            if (checkbuildin(args, arg_count))
-            {
-                continue;
-            }
-            exec_command(args, arg_count);
+            parallelize(buffer);
         }
     }
 }
