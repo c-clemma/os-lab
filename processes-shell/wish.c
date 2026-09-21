@@ -283,10 +283,11 @@ int main(int argc, char *argv[])
     }
     else // Normal mode
     {
+        printf("wish> ");
         for (ssize_t characters = getline(&buffer, &bufsize, stdin); characters != -1; characters = getline(&buffer, &bufsize, stdin))
         {
-            printf("wish> ");
             parallelize(buffer);
+            printf("wish> ");
         }
         free(buffer);
     }
