@@ -19,7 +19,6 @@ void error()
     write(STDERR_FILENO, error_message, strlen(error_message));
 }
 
-
 /**
  * Splits the input buffer into individual arguments.
  *
@@ -50,25 +49,24 @@ int tokenizer(char *buffer, char *args[], int max_args)
     return arg_count;
 }
 
-
-int redirectioner (char *buffer, char *args[], int max_args, char **outputfile)
+int redirectioner(char *buffer, char *args[], int max_args, char **outputfile)
 {
     char *cursor = buffer;
-    char *left = strsep(&cursor, ">"); //left side of >
-    char *right = cursor; // right side of >
-    if (right == NULL) //right is empty
+    char *left = strsep(&cursor, ">"); // left side of >
+    char *right = cursor;              // right side of >
+    if (right == NULL)                 // right is empty
     {
         *outputfile = NULL;
-        return tokenizer(left,args,max_args);
+        return tokenizer(left, args, max_args);
     }
-    if (strchr(right,'>')) // right have more '>'
+    if (strchr(right, '>')) // right have more '>'
     {
         error();
         return 0;
     }
 
-    int r_tokens = tokenizer(right,args,max_args);
-    if (r_tokens==1)
+    int r_tokens = tokenizer(right, args, max_args);
+    if (r_tokens == 1)
     {
         *outputfile = args[0];
     }
@@ -78,7 +76,7 @@ int redirectioner (char *buffer, char *args[], int max_args, char **outputfile)
         return 0;
     }
 
-    int l_tokens = tokenizer(left,args,max_args);
+    int l_tokens = tokenizer(left, args, max_args);
     if (l_tokens == 0) // empty left side
     {
         error();
@@ -86,7 +84,6 @@ int redirectioner (char *buffer, char *args[], int max_args, char **outputfile)
     }
     return l_tokens;
 }
-
 
 /**
  * Searches for a command in the configured paths.
@@ -112,7 +109,6 @@ char *search_path(char *command, int arg_count)
     }
     return NULL;
 }
-
 
 /**
  * Checks whether the entered command is a built-in shell command.
@@ -173,7 +169,6 @@ bool checkbuildin(char *args[], int arg_count)
     return false;
 }
 
-
 /**
  * Executes a command using fork() and execv().
  *
@@ -186,20 +181,20 @@ int exec_command(char *args[], int arg_count, char *outputfile)
     if (rc < 0)
     {
         // fork failed: exit
-        fprintf(stderr, "fork failed\n");
+        error();
         exit(1);
     }
     else if (rc == 0)
     {
         // child (new process)
         char *command = search_path(args[0], arg_count);
-        if (outputfile!= NULL)
+        if (outputfile != NULL)
         {
             // set return to output file
             close(STDOUT_FILENO);
-            int fd = open(outputfile, O_CREAT|O_WRONLY|O_TRUNC, 0644);
+            int fd = open(outputfile, O_CREAT | O_WRONLY | O_TRUNC, 0644);
             dup2(STDOUT_FILENO, STDERR_FILENO);
-            if (fd<0)
+            if (fd < 0)
             {
                 error();
                 _exit(1);
@@ -217,30 +212,28 @@ int exec_command(char *args[], int arg_count, char *outputfile)
     return rc;
 }
 
-
-//helper function to merge checkbuildin and exec_command
+// helper function to merge checkbuildin and exec_command
 int execute_line(char *buffer)
 {
     char *args[100];
     char *outfile;
     int max_args = 100;
-    int arg_count = redirectioner(buffer, args, max_args,&outfile); // amount of tokens
+    int arg_count = redirectioner(buffer, args, max_args, &outfile); // amount of tokens
     if (arg_count > 0)
     {
         if (!checkbuildin(args, arg_count))
         {
-            int rc = exec_command(args, arg_count,outfile);
+            int rc = exec_command(args, arg_count, outfile);
             return rc;
         }
     }
     return 0;
 }
 
-
 // separate commands by & and calls function to execute them
-void parallelize (char *buffer)
+void parallelize(char *buffer)
 {
-    int pids[100];
+    pid_t pids[100];
     int n = 0;
     char *cursor = buffer;
     char *token;
@@ -248,15 +241,14 @@ void parallelize (char *buffer)
     while ((token = strsep(&cursor, "&")) != NULL)
     {
         int pid = execute_line(token);
-        if (pid>0)
+        if (pid > 0)
             pids[n++] = pid;
     }
-    for (int i=0; i<n; i++)
+    for (int i = 0; i < n; i++)
     {
-        waitpid(pids[i],NULL,0);
+        waitpid(pids[i], NULL, 0);
     }
 }
-
 
 int main(int argc, char *argv[])
 {
@@ -268,7 +260,6 @@ int main(int argc, char *argv[])
     char *buffer = NULL;
     size_t bufsize = 0;
 
-
     if (argc > 2) // check for too many arguments
     {
         error();
@@ -278,12 +269,12 @@ int main(int argc, char *argv[])
     {
         FILE *fptr;
         fptr = fopen(argv[1], "r");
-        if (fptr==NULL) // file could not be open
+        if (fptr == NULL) // file could not be open
         {
             error();
             exit(1);
         }
-        for (ssize_t characters = getline(&buffer, &bufsize, fptr); characters!=-1; characters = getline(&buffer, &bufsize, fptr))
+        for (ssize_t characters = getline(&buffer, &bufsize, fptr); characters != -1; characters = getline(&buffer, &bufsize, fptr))
         {
             parallelize(buffer);
         }
@@ -292,10 +283,11 @@ int main(int argc, char *argv[])
     }
     else // Normal mode
     {
-        for (ssize_t characters = getline(&buffer, &bufsize,stdin); characters!=-1; characters = getline(&buffer, &bufsize, stdin))
+        for (ssize_t characters = getline(&buffer, &bufsize, stdin); characters != -1; characters = getline(&buffer, &bufsize, stdin))
         {
             printf("wish> ");
             parallelize(buffer);
         }
+        free(buffer);
     }
 }
