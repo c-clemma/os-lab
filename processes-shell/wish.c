@@ -254,7 +254,8 @@ int main(int argc, char *argv[])
 {
     path = malloc(sizeof(char *));
     path[0] = "/bin";
-    path_count = 1;
+    path[1] = "/usr/bin";
+    path_count = 2;
 
     // cause getline allocates memory dynamically
     char *buffer = NULL;
