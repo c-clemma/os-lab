@@ -155,7 +155,6 @@ bool checkbuildin(char *args[], int arg_count)
 
     if (strcmp("path", args[0]) == 0)
     {
-        // clear path completly TODO and malloc with size i need
         path_count = arg_count - 1;
         path = malloc(path_count * sizeof(char *));
 
@@ -254,8 +253,7 @@ int main(int argc, char *argv[])
 {
     path = malloc(sizeof(char *));
     path[0] = "/bin";
-    path[1] = "/usr/bin";
-    path_count = 2;
+    path_count = 1;
 
     // cause getline allocates memory dynamically
     char *buffer = NULL;

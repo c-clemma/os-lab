@@ -1,1 +1,1 @@
-ls: Zugriff auf '/no/such/file' nicht möglich: Datei oder Verzeichnis nicht gefunden
+ls: cannot access '/no/such/file': No such file or directory
