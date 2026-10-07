@@ -1,21 +1,67 @@
 #include <stdio.h>
 #include "request.h"
 #include "io_helper.h"
+#include <pthread.h>
 
 char default_root[] = ".";
+
+int threads = 1;
+
+int *buffer;
+int buffer_size = 1;
+
+// variables from p/c-problem
+int fill_ptr = 0;
+int use_ptr = 0;
+int buffer_count = 0;
+
+pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t readable = PTHREAD_COND_INITIALIZER;
+pthread_cond_t fillable = PTHREAD_COND_INITIALIZER;
+
+void put(int value)
+{
+	buffer[fill_ptr] = value;
+	fill_ptr = (fill_ptr + 1) % buffer_size;
+	buffer_count++;
+}
+
+// currently default: FIFO
+int get()
+{
+	int tmp = buffer[use_ptr];
+	use_ptr = (use_ptr + 1) % buffer_size;
+	buffer_count--;
+	return tmp;
+}
+
+void *worker(void *arg)
+{
+	while (1)
+	{
+		Pthread_mutex_lock(&mutex);
+		while (buffer_count == 0)
+		{
+			Pthread_cond_wait(&readable, &mutex);
+		}
+		int conn_fd = get(); // c4
+		Pthread_cond_signal(&fillable);
+		Pthread_mutex_unlock(&mutex);
+		request_handle(conn_fd); // handels a request
+		close_or_die(conn_fd);
+	}
+}
 
 //
 // ./wserver [-d <basedir>] [-p <portnum>]
 // prompt> ./wserver [-d basedir] [-p port] [-t threads] [-b buffers] [-s schedalg]
 //
+
 int main(int argc, char *argv[])
 {
 	int c;
 	char *root_dir = default_root;
 	int port = 10000;
-	int threads = 1;
-	int buffer = 1;
-	// TODO: default: FIFO
 
 	while ((c = getopt(argc, argv, "d:p:t:b:s:l:")) != -1) // Parses command line options and parameter list
 		switch (c)
@@ -35,7 +81,7 @@ int main(int argc, char *argv[])
 		case 'b':
 		{
 			int b = atoi(optarg);
-			buffer = (b > 0) ? b : 1;
+			buffer_size = (b > 0) ? b : 1;
 			break;
 		}
 		case 's':
@@ -66,7 +112,11 @@ int main(int argc, char *argv[])
 
 	// now, get to work -> accept loop
 	int listen_fd = open_listen_fd_or_die(port); // automates the process of creating and configuring a listening socket
-	// TODO here: initialize buffer
+
+	// initialize buffer
+	buffer = malloc(buffer_size * sizeof(int));
+
+	// 1 producer
 	while (1)
 	{
 		struct sockaddr_in client_addr;
@@ -74,8 +124,15 @@ int main(int argc, char *argv[])
 		// blocks/sleeps until a client connects
 		// TODO create threads worker
 		int conn_fd = accept_or_die(listen_fd, (sockaddr_t *)&client_addr, (socklen_t *)&client_len);
-		request_handle(conn_fd); // handels a request
-		close_or_die(conn_fd);
+
+		Pthread_mutex_lock(&mutex);
+		while (buffer_count == buffer_size)
+		{
+			Pthread_cond_wait(&fillable, &mutex);
+		}
+		put(conn_fd);
+		Pthread_cond_signal(&readable);
+		Pthread_mutex_unlock(&mutex);
 	}
 	return 0;
 }
