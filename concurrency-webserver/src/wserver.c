@@ -1,6 +1,8 @@
 #include <stdio.h>
 #include "request.h"
 #include "io_helper.h"
+#include <time.h>
+#define MAXBUF (8192)
 
 char default_root[] = ".";
 
@@ -15,6 +17,9 @@ int main(int argc, char *argv[])
 	int port = 10000;
 	int threads = 1;
 	int buffer = 1;
+	char *outfile = NULL;
+	struct timespec ts;
+	clock_gettime(CLOCK_MONOTONIC,&ts);
 	// TODO: default: FIFO
 
 	while ((c = getopt(argc, argv, "d:p:t:b:s:l:")) != -1) // Parses command line options and parameter list
@@ -39,9 +44,13 @@ int main(int argc, char *argv[])
 			break;
 		}
 		case 's':
+		{
 			// could handle change between FIFO and SFF; but not necessary right now
 			break;
+		}
 		case 'l':
+		{
+			outfile = optarg;  // get file name
 			/*
 			TODO: Logging
 				The webserver should have an additional command-line argument [-l log_file]. If
@@ -56,6 +65,7 @@ int main(int argc, char *argv[])
 				synchronization so the logs aren't corrupted.
 			*/
 			break;
+		}
 		default:
 			fprintf(stderr, "usage: wserver [-d basedir] [-p port]\n");
 			exit(1);
@@ -63,6 +73,7 @@ int main(int argc, char *argv[])
 
 	// run out of this directory
 	chdir_or_die(root_dir);
+
 
 	// now, get to work -> accept loop
 	int listen_fd = open_listen_fd_or_die(port); // automates the process of creating and configuring a listening socket
@@ -74,7 +85,28 @@ int main(int argc, char *argv[])
 		// blocks/sleeps until a client connects
 		// TODO create threads worker
 		int conn_fd = accept_or_die(listen_fd, (sockaddr_t *)&client_addr, (socklen_t *)&client_len);
+		struct timespec time_thread; // time of request
+		clock_gettime(CLOCK_MONOTONIC,&time_thread); // get the time
 		request_handle(conn_fd); // handels a request
+
+		// TODO: packet it in mutex, this part is only on complete, arrived should be before request_handle
+		if (outfile != NULL)
+		{
+			int file = open(outfile, O_CREAT | O_WRONLY | O_APPEND, 0644); //open file to append
+			char buff[MAXBUF];
+			int max_len = sizeof buff;
+			struct timespec time_now; // logging time
+			clock_gettime(CLOCK_MONOTONIC,&time_now);
+			double time_clock =time_now.tv_sec-ts.tv_sec + (time_now.tv_nsec/1e9-ts.tv_nsec/1e9);
+			double time_request =time_now.tv_sec-time_thread.tv_sec + (time_now.tv_nsec/1e9-time_thread.tv_nsec/1e9);
+
+			int l = snprintf(buff,max_len,"%.4fs [%s] %s - request: %s %s (%.4fs total)\n", time_clock, "PLACEHOLDER Thread", "PLACEHOLDER Status", "PLACEHOLDER method", "PLACEHOLDER uri", time_request); // formating of the log
+			if (l>= max_len)
+				write(file, buff, max_len-1);
+			else
+				write(file, buff, l);
+			close(file);
+		}
 		close_or_die(conn_fd);
 	}
 	return 0;
