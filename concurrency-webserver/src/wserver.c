@@ -2,6 +2,8 @@
 #include "request.h"
 #include "io_helper.h"
 #include <pthread.h>
+#include <time.h>
+#define MAXBUF (8192)
 
 char default_root[] = ".";
 
@@ -18,6 +20,10 @@ int buffer_count = 0;
 pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t readable = PTHREAD_COND_INITIALIZER;
 pthread_cond_t fillable = PTHREAD_COND_INITIALIZER;
+
+char *outfile = NULL;
+struct timespec ts;
+// clock_gettime(CLOCK_MONOTONIC, &ts);
 
 void put(int value)
 {
@@ -48,6 +54,26 @@ void *worker(void *arg)
 		Pthread_cond_signal(&fillable);
 		Pthread_mutex_unlock(&mutex);
 		request_handle(conn_fd); // handels a request
+
+		/* // TODO: packet it in mutex, this part is only on complete, arrived should be before request_handle
+		if (outfile != NULL)
+		{
+			int file = open(outfile, O_CREAT | O_WRONLY | O_APPEND, 0644); // open file to append
+			char buff[MAXBUF];
+			int max_len = sizeof buff;
+			struct timespec time_now; // logging time
+			clock_gettime(CLOCK_MONOTONIC, &time_now);
+			double time_clock = time_now.tv_sec - ts.tv_sec + (time_now.tv_nsec / 1e9 - ts.tv_nsec / 1e9);
+			double time_request = time_now.tv_sec - time_thread.tv_sec + (time_now.tv_nsec / 1e9 - time_thread.tv_nsec / 1e9);
+
+			int l = snprintf(buff, max_len, "%.4fs [%s] %s - request: %s %s (%.4fs total)\n", time_clock, "PLACEHOLDER Thread", "PLACEHOLDER Status", "PLACEHOLDER method", "PLACEHOLDER uri", time_request); // formating of the log
+			if (l >= max_len)
+				write(file, buff, max_len - 1);
+			else
+				write(file, buff, l);
+			close(file);
+		}*/
+
 		close_or_die(conn_fd);
 	}
 }
@@ -88,6 +114,7 @@ int main(int argc, char *argv[])
 			// could handle change between FIFO and SFF; but not necessary right now
 			break;
 		case 'l':
+			outfile = optarg; // get file name
 			/*
 			TODO: Logging
 				The webserver should have an additional command-line argument [-l log_file]. If
@@ -140,6 +167,9 @@ int main(int argc, char *argv[])
 		// TODO create threads worker
 
 		int conn_fd = accept_or_die(listen_fd, (sockaddr_t *)&client_addr, (socklen_t *)&client_len);
+
+		struct timespec time_thread;				  // time of request
+		clock_gettime(CLOCK_MONOTONIC, &time_thread); // get the time
 
 		Pthread_mutex_lock(&mutex);
 		while (buffer_count == buffer_size)
