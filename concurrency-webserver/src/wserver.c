@@ -115,6 +115,21 @@ int main(int argc, char *argv[])
 
 	// initialize buffer
 	buffer = malloc(buffer_size * sizeof(int));
+	if (buffer == NULL)
+	{
+		fprintf(stderr, "malloc failed\n");
+		exit(1);
+	}
+
+	for (int i = 0; i < threads; i++)
+	{
+		pthread_t p1;
+		if (Pthread_create(&p1, NULL, worker, NULL) != 0)
+		{
+			fprintf(stderr, "pthread_create failed\n");
+			exit(1);
+		}
+	}
 
 	// 1 producer
 	while (1)
@@ -123,6 +138,7 @@ int main(int argc, char *argv[])
 		int client_len = sizeof(client_addr);
 		// blocks/sleeps until a client connects
 		// TODO create threads worker
+
 		int conn_fd = accept_or_die(listen_fd, (sockaddr_t *)&client_addr, (socklen_t *)&client_len);
 
 		Pthread_mutex_lock(&mutex);
