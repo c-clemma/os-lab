@@ -45,14 +45,14 @@ void *worker(void *arg)
 {
 	while (1)
 	{
-		Pthread_mutex_lock(&mutex);
+		pthread_mutex_lock(&mutex);
 		while (buffer_count == 0)
 		{
-			Pthread_cond_wait(&readable, &mutex);
+			pthread_cond_wait(&readable, &mutex);
 		}
 		int conn_fd = get(); // c4
-		Pthread_cond_signal(&fillable);
-		Pthread_mutex_unlock(&mutex);
+		pthread_cond_signal(&fillable);
+		pthread_mutex_unlock(&mutex);
 		request_handle(conn_fd); // handels a request
 
 		/* // TODO: packet it in mutex, this part is only on complete, arrived should be before request_handle
@@ -80,7 +80,7 @@ void *worker(void *arg)
 
 //
 // ./wserver [-d <basedir>] [-p <portnum>]
-// prompt> ./wserver [-d basedir] [-p port] [-t threads] [-b buffers] [-s schedalg]
+// prompt> ./wserver [-d basedir] [-p port] [-t threads] [-b buffers] [-s schedalg] [-l logging]
 //
 
 int main(int argc, char *argv[])
@@ -111,6 +111,11 @@ int main(int argc, char *argv[])
 			break;
 		}
 		case 's':
+			if (strcmp(optarg, "SFF") == 0)
+			{
+				fprintf(stderr, "SFF is not implemented yet.");
+				exit(1);
+			}
 			// could handle change between FIFO and SFF; but not necessary right now
 			break;
 		case 'l':
@@ -130,7 +135,7 @@ int main(int argc, char *argv[])
 			*/
 			break;
 		default:
-			fprintf(stderr, "usage: wserver [-d basedir] [-p port]\n");
+			fprintf(stderr, "usage: wserver [-d basedir] [-p port] [-t threads] [-b buffers] [-s schedalg] [-l logging]\n");
 			exit(1);
 		}
 
@@ -151,7 +156,7 @@ int main(int argc, char *argv[])
 	for (int i = 0; i < threads; i++)
 	{
 		pthread_t p1;
-		if (Pthread_create(&p1, NULL, worker, NULL) != 0)
+		if (pthread_create(&p1, NULL, worker, NULL) != 0)
 		{
 			fprintf(stderr, "pthread_create failed\n");
 			exit(1);
@@ -171,14 +176,14 @@ int main(int argc, char *argv[])
 		struct timespec time_thread;				  // time of request
 		clock_gettime(CLOCK_MONOTONIC, &time_thread); // get the time
 
-		Pthread_mutex_lock(&mutex);
+		pthread_mutex_lock(&mutex);
 		while (buffer_count == buffer_size)
 		{
-			Pthread_cond_wait(&fillable, &mutex);
+			pthread_cond_wait(&fillable, &mutex);
 		}
 		put(conn_fd);
-		Pthread_cond_signal(&readable);
-		Pthread_mutex_unlock(&mutex);
+		pthread_cond_signal(&readable);
+		pthread_mutex_unlock(&mutex);
 	}
 	return 0;
 }
