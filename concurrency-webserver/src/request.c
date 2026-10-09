@@ -8,6 +8,63 @@
 
 #define MAXBUF (8192)
 
+
+//
+// A client that abandons its connection must only cost one request.
+//
+// Writes len bytes, retrying on short writes. Returns 0 on success, -1 if the
+// client has gone away (EPIPE / ECONNRESET).
+int write_to_client(int fd, char *buf, size_t len)
+{
+    size_t written = 0;
+
+    while (written < len)
+    {
+        ssize_t rc = write(fd, buf + written, len - written);
+        if (rc < 0)
+        {
+            if (errno == EINTR)
+                continue;
+            return -1;
+        }
+        written += rc;
+    }
+    return 0;
+}
+
+// Returns -1 instead of aborting when the connection breaks.
+// Returns the number of bytes read, 0 at EOF, -1 on error.
+ssize_t readline_from_client(int fd, void *buf, size_t maxlen)
+{
+    char *bufp = buf;
+    size_t n = 0;
+
+    while (n < maxlen - 1)
+    {
+        char c;
+        ssize_t rc = read(fd, &c, 1);
+        if (rc == 1)
+        {
+            *bufp++ = c;
+            n++;
+            if (c == '\n')
+                break;
+        }
+        else if (rc == 0)
+        {
+            break; // EOF: client closed the connection
+        }
+        else if (errno != EINTR)
+        {
+            // the client connected but never sent anything, treated like any other dead connection.
+            *bufp = '\0';
+            return -1;
+        }
+    }
+    *bufp = '\0';
+    return n;
+}
+
 void request_error(int fd, char *cause, char *errnum, char *shortmsg, char *longmsg)
 {
     char buf[MAXBUF], body[MAXBUF];
@@ -27,31 +84,37 @@ void request_error(int fd, char *cause, char *errnum, char *shortmsg, char *long
 
     // Write out the header information for this response
     sprintf(buf, "HTTP/1.0 %s %s\r\n", errnum, shortmsg);
-    write_or_die(fd, buf, strlen(buf));
+    if (write_to_client(fd, buf, strlen(buf)) < 0)
+        return;
 
     sprintf(buf, "Content-Type: text/html\r\n");
-    write_or_die(fd, buf, strlen(buf));
+    if (write_to_client(fd, buf, strlen(buf)) < 0)
+        return;
 
     sprintf(buf, "Content-Length: %lu\r\n\r\n", strlen(body));
-    write_or_die(fd, buf, strlen(buf));
+    if (write_to_client(fd, buf, strlen(buf)) < 0)
+        return;
 
     // Write out the body last
-    write_or_die(fd, body, strlen(body));
+    write_to_client(fd, body, strlen(body));
 }
 
 //
 // Reads and discards everything up to an empty text line
 //
-void request_read_headers(int fd)
+// Returns 0 once the blank line is reached, -1 if the client disconnected first
+int request_read_headers(int fd)
 {
     char buf[MAXBUF];
 
-    readline_or_die(fd, buf, MAXBUF);
+    if (readline_from_client(fd, buf, MAXBUF) <= 0)
+        return -1;
     while (strcmp(buf, "\r\n"))
     {
-        readline_or_die(fd, buf, MAXBUF);
+        if (readline_from_client(fd, buf, MAXBUF) <= 0)
+            return -1;
     }
-    return;
+    return 0;
 }
 
 //
@@ -116,7 +179,8 @@ void request_serve_dynamic(int fd, char *filename, char *cgiargs)
                  "HTTP/1.0 200 OK\r\n"
                  "Server: OSTEP WebServer\r\n");
 
-    write_or_die(fd, buf, strlen(buf));
+    if (write_to_client(fd, buf, strlen(buf)) < 0)
+        return;
 
     if (fork_or_die() == 0)
     {                                              // child
@@ -137,12 +201,6 @@ void request_serve_static(int fd, char *filename, int filesize)
     char *srcp, filetype[MAXBUF], buf[MAXBUF];
 
     request_get_filetype(filename, filetype);
-    srcfd = open_or_die(filename, O_RDONLY, 0);
-
-    // Rather than call read() to read the file into memory,
-    // which would require that we allocate a buffer, we memory-map the file
-    srcp = mmap_or_die(0, filesize, PROT_READ, MAP_PRIVATE, srcfd, 0);
-    close_or_die(srcfd);
 
     // put together response
     sprintf(buf, ""
@@ -152,10 +210,24 @@ void request_serve_static(int fd, char *filename, int filesize)
                  "Content-Type: %s\r\n\r\n",
             filesize, filetype);
 
-    write_or_die(fd, buf, strlen(buf));
+    // mmap() rejects a length of 0, so an empty file is headers only. Without
+    // it the mmap_or_die() assert would abort the whole server.
+    if (filesize == 0)
+    {
+        write_to_client(fd, buf, strlen(buf));
+        return;
+    }
 
-    //  Writes out to the client socket the memory-mapped file
-    write_or_die(fd, srcp, filesize);
+    srcfd = open_or_die(filename, O_RDONLY, 0);
+
+    // Rather than call read() to read the file into memory, memory-map the file
+    srcp = mmap_or_die(0, filesize, PROT_READ, MAP_PRIVATE, srcfd, 0);
+    close_or_die(srcfd);
+
+    //  Writes out to the client socket the memory-mapped file; a client that
+    //  disconnects mid-transfer just ends this request
+    if (write_to_client(fd, buf, strlen(buf)) == 0)
+        write_to_client(fd, srcp, filesize);
     munmap_or_die(srcp, filesize);
 }
 
@@ -163,13 +235,17 @@ void request_serve_static(int fd, char *filename, int filesize)
 //
 // Reads only the request line ("GET /index.html HTTP/1.0") off the socket, for easy logs.
 //
-void request_parse_line(int fd, char *method, char *uri, char *version)
+// Returns 0 when a request line was read, -1 if the client disconnected
+// without sending one (browsers open speculative connections that do this).
+int request_parse_line(int fd, char *method, char *uri, char *version)
 {
     char buf[MAXBUF];
 
     method[0] = uri[0] = version[0] = '\0';
-    readline_or_die(fd, buf, MAXBUF);
+    if (readline_from_client(fd, buf, MAXBUF) <= 0)
+        return -1;
     sscanf(buf, "%s %s %s", method, uri, version);
+    return 0;
 }
 
 //
@@ -185,12 +261,16 @@ void request_serve(int fd, char *method, char *uri)
     // leave the caller's string intact for its log lines
     char uri_copy[MAXBUF];
     strcpy(uri_copy, uri);
+
+    // Drain the headers before sending any response, including an error one.
+    if (request_read_headers(fd) < 0)
+        return; // client went away before finishing its request
+
     if (strcasecmp(method, "GET"))
     {
         request_error(fd, method, "501", "Not Implemented", "server does not implement this method");
         return;
     }
-    request_read_headers(fd);
 
     // security for ".."
     if (strstr(uri_copy, ".."))
@@ -224,13 +304,4 @@ void request_serve(int fd, char *method, char *uri)
         }
         request_serve_dynamic(fd, filename, cgiargs);
     }
-}
-
-// wrapper helper function to simplify logs (request_serve is previous request_handle)
-void request_handle(int fd)
-{
-    char method[MAXBUF], uri[MAXBUF], version[MAXBUF];
-
-    request_parse_line(fd, method, uri, version);
-    request_serve(fd, method, uri);
 }

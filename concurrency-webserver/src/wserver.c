@@ -5,18 +5,18 @@
 #include <time.h>
 #define MAXBUF (8192)
 
+// How long a worker will wait for a client that has connected but sent nothing
+#define CLIENT_TIMEOUT_SECS (5)
+
 char default_root[] = ".";
 
 int threads = 1;
 
-// One slot of the shared buffer. The master fills this in before queueing,
-// so a worker gets everything it needs to serve the request *and* to log it.
+// One slot of the shared buffer
 typedef struct
 {
 	int conn_fd;
 	struct timespec arrival; // timing of arrival
-	char method[MAXBUF];
-	char uri[MAXBUF];
 } request_t;
 
 request_t *buffer;
@@ -96,6 +96,7 @@ void *worker(void *arg)
 	snprintf(label, sizeof label, "%d", id);
 
 	int log_fd = log_open(); // open log file for this thread
+	char method[MAXBUF], uri[MAXBUF], version[MAXBUF];
 	char tail[64];
 
 	while (1)
@@ -109,17 +110,29 @@ void *worker(void *arg)
 		pthread_cond_signal(&fillable);
 		pthread_mutex_unlock(&mutex);
 
+		// Time when worker picks request up
 		struct timespec started;
 		clock_gettime(CLOCK_MONOTONIC, &started);
-		snprintf(tail, sizeof tail, " (%.4fs waiting)", time_diff(req.arrival, started));
-		log_event(log_fd, started, label, "Started", req.method, req.uri, tail);
 
-		request_serve(req.conn_fd, req.method, req.uri); // handles a request
+		// Worker waits instead of whole server,so a client that never
+		// sends a request cannot block the accept loop.
+		if (request_parse_line(req.conn_fd, method, uri, version) < 0)
+		{
+			// connection abandoned without a request: nothing to log
+			close_or_die(req.conn_fd);
+			continue;
+		}
+		log_event(log_fd, req.arrival, "Main", "Arrived", method, uri, "");
+
+		snprintf(tail, sizeof tail, " (%.4fs waiting)", time_diff(req.arrival, started));
+		log_event(log_fd, started, label, "Started", method, uri, tail);
+
+		request_serve(req.conn_fd, method, uri); // handles a request
 
 		struct timespec completed;
 		clock_gettime(CLOCK_MONOTONIC, &completed);
 		snprintf(tail, sizeof tail, " (%.4fs total)", time_diff(req.arrival, completed));
-		log_event(log_fd, completed, label, "Completed", req.method, req.uri, tail);
+		log_event(log_fd, completed, label, "Completed", method, uri, tail);
 
 		close_or_die(req.conn_fd);
 	}
@@ -133,6 +146,12 @@ void *worker(void *arg)
 
 int main(int argc, char *argv[])
 {
+	// A client that abandons its connection raises SIGPIPE,
+	// whose default action kills the whole server
+	// ignoring it turns the failure into an EPIPE that
+	// write_to_client() handles per-request.
+	signal(SIGPIPE, SIG_IGN);
+
 	clock_gettime(CLOCK_MONOTONIC, &ts); // Start program clocking
 	int c;
 	char *root_dir = default_root;
@@ -164,8 +183,7 @@ int main(int argc, char *argv[])
 			{
 				if (strcmp(optarg, "SFF") == 0)
 				{
-					// TODO: Implement SFF
-					fprintf(stderr, "SFF is not implemented yet.\n");
+					fprintf(stderr, "SFF is not implemented.\n");
 					exit(1);
 				}
 			}
@@ -197,12 +215,15 @@ int main(int argc, char *argv[])
 		exit(1);
 	}
 
-	int log_fd = log_open(); // open log file for master
-	if (outfile !=NULL && log_fd<0)
+	// check for bad -l path fails at startup
+	int log_check = log_open();
+	if (outfile != NULL && log_check < 0)
 	{
-		fprintf(stderr, "usage: wserver [-d basedir] [-p port] [-t threads] [-b buffers] [-s schedalg] [-l logging]\n");
+		fprintf(stderr, "could not open log file: %s\n", outfile);
 		exit(1);
 	}
+	if (log_check >= 0)
+		close(log_check);
 
 	for (int i = 0; i < threads; i++)
 	{
@@ -219,17 +240,15 @@ int main(int argc, char *argv[])
 	{
 		struct sockaddr_in client_addr;
 		int client_len = sizeof(client_addr);
-		char version[MAXBUF];
 		request_t req;
 
 		// blocks/sleeps until a client connects
 		req.conn_fd = accept_or_die(listen_fd, (sockaddr_t *)&client_addr, (socklen_t *)&client_len);
 		clock_gettime(CLOCK_MONOTONIC, &req.arrival); // time of request
 
-		// the master reads the request line so it can log what arrived; the
-		// worker picks the request up from the headers onward
-		request_parse_line(req.conn_fd, req.method, req.uri, version);
-		log_event(log_fd, req.arrival, "Main", "Arrived", req.method, req.uri, "");
+
+		struct timeval timeout = {.tv_sec = CLIENT_TIMEOUT_SECS, .tv_usec = 0};
+		setsockopt(req.conn_fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof timeout);
 
 		pthread_mutex_lock(&mutex);
 		while (buffer_count == buffer_size)
