@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>xv6 File System Image Visualizer</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header id="topbar">
+  <div id="file-controls">
+    <input type="file" id="file-input" accept=".img">
+    <span id="drop-hint">or drag an image file onto the disk view below</span>
+    <button id="reset-btn" disabled>Reset to original</button>
+    <button id="download-btn" disabled>Download image</button>
+    <span id="modified-indicator"></span>
+  </div>
+  <div id="toolbar">
+    <label>Jump to block # <input type="text" id="jump-block"><button id="jump-block-btn">Go</button></label>
+    <label>Jump to inode # <input type="text" id="jump-inode"><button id="jump-inode-btn">Go</button></label>
+    <label>Find inodes referencing block # <input type="text" id="search-block"><button id="search-block-btn">Search</button></label>
+    <label>Find directory entries for inode # <input type="text" id="search-inode"><button id="search-inode-btn">Search</button></label>
+  </div>
+  <div id="search-results-panel" class="hidden">
+    <button id="clear-search-results" title="Close">&times;</button>
+    <div id="search-results-list"></div>
+  </div>
+  <div id="status-bar">No selection.</div>
+</header>
+
+<div id="legend">
+  <span class="legend-item"><span class="legend-swatch role-boot"></span>Boot</span>
+  <span class="legend-item"><span class="legend-swatch role-superblock"></span>Superblock</span>
+  <span class="legend-item"><span class="legend-swatch role-log"></span>Log</span>
+  <span class="legend-item"><span class="legend-swatch inode-allocated"></span>Inode (allocated)</span>
+  <span class="legend-item"><span class="legend-swatch inode-unallocated"></span>Inode (free)</span>
+  <span class="legend-item"><span class="legend-swatch bit-used"></span>Bitmap bit (used)</span>
+  <span class="legend-item"><span class="legend-swatch bit-free"></span>Bitmap bit (free)</span>
+  <span class="legend-item"><span class="legend-swatch role-data"></span>Data (free)</span>
+  <span class="legend-item"><span class="legend-swatch role-data role-data-allocated"></span>Data (allocated)</span>
+  <span class="legend-item"><span class="legend-swatch role-dir"></span>Directory data</span>
+  <span class="legend-item"><span class="legend-swatch role-indirect"></span>Indirect block</span>
+  <span class="legend-item"><span class="legend-swatch inconsistent"></span>Doesn't add up (see details)</span>
+</div>
+
+<main id="panes">
+  <div id="left-pane">
+    <p id="empty-state">Choose a file above, or drag an xv6 file system image onto this area.
+    A few sample images (one clean, three deliberately corrupted) are in <code>sample-images/</code> next to this page.</p>
+    <div id="grid"></div>
+    <svg id="arrow-svg"></svg>
+  </div>
+  <div id="col-splitter" class="splitter splitter-col" title="Drag to resize"></div>
+  <div id="right-pane">
+    <div id="details"></div>
+    <div id="tree-splitter" class="splitter splitter-row" title="Drag to resize"></div>
+    <div id="tree-pane">
+      <div class="pane-title">Directory tree</div>
+      <div id="dir-tree"><p class="placeholder">Load an image to see its directory tree.</p></div>
+    </div>
+  </div>
+</main>
+
+<div id="row-splitter" class="splitter splitter-row" title="Drag to resize"></div>
+<div id="bottom-pane">
+  <div id="hexdump-container"></div>
+</div>
+
+<script src="js/fsimage.js"></script>
+<script src="js/model.js"></script>
+<script src="js/hexdump.js"></script>
+<script src="js/arrows.js"></script>
+<script src="js/grid.js"></script>
+<script src="js/details.js"></script>
+<script src="js/tree.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>
