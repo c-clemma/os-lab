@@ -14,9 +14,10 @@
 #include "xcheck.h"
 
 /* xv6 images are little-endian on disk. Use these on every multi-byte
- * field you read so the checker also works on a big-endian machine. 
+ * field you read so the checker also works on a big-endian machine.
  * See the code marked (a) in the header. */
- u16 xshort(u16 x) {
+u16 xshort(u16 x)
+{
   u16 y;
   u8 *a = (u8 *)&y;
   a[0] = x;
@@ -24,7 +25,8 @@
   return y;
 }
 
-u32 xint(u32 x) {
+u32 xint(u32 x)
+{
   u32 y;
   u8 *a = (u8 *)&y;
   a[0] = x;
@@ -34,18 +36,24 @@ u32 xint(u32 x) {
   return y;
 }
 
-int main(int argc, char **argv) {
-  if (argc != 2) {
+int main(int argc, char **argv)
+{
+  if (argc != 2)
+  {
     fprintf(stderr, "Usage: xcheck <file_system_image>\n");
     exit(1);
   }
 
   // Open the image file
   int fd = open(argv[1], O_RDONLY);
-  if (fd < 0) {
-    if (errno == ENOENT) {
+  if (fd < 0)
+  {
+    if (errno == ENOENT)
+    {
       fprintf(stderr, "image not found.\n");
-    } else {
+    }
+    else
+    {
       perror("could not open image");
     }
     exit(1);
@@ -53,7 +61,8 @@ int main(int argc, char **argv) {
 
   // Check that the file is readable
   struct stat statbuf;
-  if (fstat(fd, &statbuf) < 0) {
+  if (fstat(fd, &statbuf) < 0)
+  {
     perror("could not stat image");
     exit(1);
   }
@@ -63,7 +72,8 @@ int main(int argc, char **argv) {
   // file system. This means you can access any part of the file system
   // by just computing an offset into those bytes!
   u8 *img = mmap(NULL, statbuf.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
-  if (img == MAP_FAILED) {
+  if (img == MAP_FAILED)
+  {
     perror("could not mmap image");
     exit(1);
   }
@@ -90,14 +100,16 @@ int main(int argc, char **argv) {
   // hardcoded constant.
   // ------------------------------------------------------------------
   // Loop over all the inodes. The number of inodes comes from the superblock above.
-  for (u32 inum = 0; inum < ninodes; inum++) {
+  for (u32 inum = 0; inum < ninodes; inum++)
+  {
     // Get the address of the inode data. Note this is cacluated as:
     // [address of the image] <--where the file system is in memory
     // + [number of blocks before the inodes]*[size of each block] <--space before the inodes
     // + [inode number to look at]*[size of an inode] <--where each inode is
     dinode *dip = (dinode *)(img + inodestart * BSIZE + inum * sizeof(dinode));
     u16 type = xshort(dip->type);
-    if (type != 0 && type != T_DIR && type != T_FILE && type != T_DEV) {
+    if (type != 0 && type != T_DIR && type != T_FILE && type != T_DEV)
+    {
       fprintf(stderr, "ERROR: bad inode.\n");
       exit(1);
     }
@@ -112,6 +124,55 @@ int main(int argc, char **argv) {
   //
   //   2.  ERROR: bad direct address in inode.
   //       ERROR: bad indirect address in inode.
+  for (u32 inum = 0; inum < ninodes; inum++)
+  {
+    dinode *dip = (dinode *)(img + inodestart * BSIZE + inum * sizeof(dinode));
+    u16 type = xshort(dip->type);
+    if (type == 0)
+    { // not used inode
+      continue;
+    }
+    // check direct
+    for (u32 i = 0; i < NDIRECT; i++)
+    {
+      u32 adr = xint(dip->addrs[i]);
+      if (adr == 0)
+      {
+        continue;
+      }
+      if (adr < (xint(sb->size) - xint(sb->nblocks)) || adr >= xint(sb->size))
+      {
+        fprintf(stderr, "ERROR: bad direct address in inode.\n");
+        exit(1);
+      }
+    }
+    // check indirect
+    u32 adr = xint(dip->addrs[NDIRECT]); // block number
+    if (adr != 0)
+    {
+      if (adr < (xint(sb->size) - xint(sb->nblocks)) || adr >= xint(sb->size))
+      {
+        fprintf(stderr, "ERROR: bad indirect address in inode.\n");
+        exit(1);
+      }
+
+      u32 *indirect = (u32 *)(img + adr * BSIZE); // go to adress = block nr -> actuall adress
+      for (u32 i = 0; i < NINDIRECT; i++)
+      {
+        u32 inadr = xint(indirect[i]);
+        if (inadr == 0)
+        {
+          continue;
+        }
+        if (inadr < (xint(sb->size) - xint(sb->nblocks)) || inadr >= xint(sb->size))
+        {
+          fprintf(stderr, "ERROR: bad indirect address in inode.\n");
+          exit(1);
+        }
+      }
+    }
+  }
+
   //   3.  ERROR: root directory does not exist.
   //   4.  ERROR: directory not properly formatted.
   //   5.  ERROR: address used by inode but marked free in bitmap.
