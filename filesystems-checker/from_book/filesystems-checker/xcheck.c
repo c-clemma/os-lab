@@ -217,14 +217,14 @@ int main(int argc, char **argv)
     exit(1);
   }*/
 
-  dinode *dip = (dinode *)(img + inodestart * BSIZE + 1 * sizeof(dinode)); // first inode
-  u16 type = xshort(dip->type);
+  dinode *firstdip = (dinode *)(img + inodestart * BSIZE + 1 * sizeof(dinode)); // first inode
+  u16 type = xshort(firstdip->type);
   if (type != T_DIR)
   { // not a directory
     fprintf(stderr, "ERROR: root directory does not exist.\n");
     exit(1);
   }
-  u32 adr = xint(dip->addrs[0]);                    // first datablock
+  u32 adr = xint(firstdip->addrs[0]);               // first datablock
   dirent *dentries = (dirent *)(img + adr * BSIZE); // go to block to access directory entries
   u16 number = xshort(dentries[1].inum);            // second entry for ..
   if (adr == 0 || strcmp(dentries[1].name, "..") != 0 || number != 1)
@@ -232,8 +232,29 @@ int main(int argc, char **argv)
     fprintf(stderr, "ERROR: root directory does not exist.\n");
     exit(1);
   }
+
   //   4.  ERROR: directory not properly formatted.
+  for (u32 inum = 0; inum < ninodes; inum++)
+  {
+    dinode *dip = (dinode *)(img + inodestart * BSIZE + inum * sizeof(dinode));
+    u16 type = xshort(dip->type);
+    if (type != T_DIR)
+    { // not a directory
+      continue;
+    }
+    // check first datablock for . and ..
+    u32 adr = xint(dip->addrs[0]);
+    dirent *dentries = (dirent *)(img + adr * BSIZE); // go to block to access directory entries
+    u16 number = xshort(dentries[0].inum);            // inum number for .
+    if (adr == 0 || strcmp(dentries[0].name, ".") != 0 || strcmp(dentries[1].name, "..") != 0 || number != inum)
+    {
+      fprintf(stderr, "ERROR: directory not properly formatted.\n");
+      exit(1);
+    }
+  } // maxbe need to itterate through all entries??
+
   //   5.  ERROR: address used by inode but marked free in bitmap.
+
   //   6.  ERROR: bitmap marks block in use but it is not in use.
   //   7.  ERROR: direct address used more than once.
   //   8.  ERROR: indirect address used more than once.
