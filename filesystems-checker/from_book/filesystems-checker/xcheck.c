@@ -127,7 +127,7 @@ int main(int argc, char **argv)
   u32 start = size - nblocks;                     // blocknumber of first datablock
   u8 *bitmap = img + xint(sb->bmapstart) * BSIZE; // points to datamap
   int *used_blocks = calloc(size, sizeof(int));   // build a second bitmap to compare for Test 6
-
+  int *referenced_in = calloc(ninodes, sizeof(int));
   //
   //   2.  ERROR: bad direct address in inode.
   //       ERROR: bad indirect address in inode.
@@ -274,6 +274,9 @@ int main(int argc, char **argv)
       fprintf(stderr, "ERROR: directory not properly formatted.\n");
       exit(1);
     }
+
+    //  9.  ERROR: inode marked use but not found in a directory.
+
   } // maxbe need to itterate through all entries??
 
   // 5. see above
@@ -300,6 +303,80 @@ int main(int argc, char **argv)
   //   9.  ERROR: inode marked use but not found in a directory.
   //   10. ERROR: inode referred to in directory but marked free.
   //   11. ERROR: bad reference count for file.
+  for (u32 inum = 0; inum < ninodes; inum++)
+  {
+    dinode *dip = (dinode *)(img + inodestart * BSIZE + inum * sizeof(dinode));
+    u16 type = xshort(dip->type);
+    if (type != T_DIR)
+    { // not a directory
+      continue;
+    }
+    // check direct
+    for (u32 i = 0; i < NDIRECT; i++)
+    {
+      u32 adr = xint(dip->addrs[i]); // datablock
+      if (adr == 0)
+      {
+        continue;
+      }
+      dirent *dentries = (dirent *)(img + adr * BSIZE); // go to block to access directory entries
+      for (u32 j = 0; j < (BSIZE / sizeof(dirent)); j++)
+      { // go through all 32 entries -> not hard coded!
+        u16 number = xshort(dentries[j].inum);
+        if (number == 0)
+        {
+          continue;
+        }
+        dinode *referenced = (dinode *)(img + inodestart * BSIZE + number * sizeof(dinode));
+        u16 ref_type = xshort(referenced->type);
+        if (ref_type == 0)
+        {
+          fprintf(stderr, "ERROR: inode referred to in directory but marked free.\n");
+          exit(1);
+        }
+        referenced_in[number]++;
+      }
+    }
+    u32 adr = xint(dip->addrs[NDIRECT]); // block number
+    if (adr != 0)
+    {
+      u32 *indirect = (u32 *)(img + adr * BSIZE); // go to adress = block nr -> actuall adress
+      for (u32 i = 0; i < NINDIRECT; i++)
+      {
+        u32 inadr = xint(indirect[i]);
+        if (inadr == 0)
+        {
+          continue;
+        }
+        dirent *dentries = (dirent *)(img + inadr * BSIZE); // go to block to access directory entries
+        for (u32 j = 0; j < (BSIZE / sizeof(dirent)); j++)
+        { // go through all 32 entries -> not hard coded!
+          u16 number = xshort(dentries[j].inum);
+          if (number == 0)
+          {
+            continue;
+          }
+          referenced_in[number]++;
+        }
+      }
+    }
+  }
+  // CHECK for 9 & 11:
+  for (u32 inum = 0; inum < ninodes; inum++)
+  {
+    dinode *dip = (dinode *)(img + inodestart * BSIZE + inum * sizeof(dinode));
+    u16 type = xshort(dip->type);
+    if (type != 0 && inum != 1 && referenced_in[inum] == 0)
+    {
+      fprintf(stderr, "ERROR: inode marked use but not found in a directory.\n");
+      exit(1);
+    }
+    if (type == T_FILE && referenced_in[inum] != xshort(dip->nlink))
+    {
+      fprintf(stderr, "ERROR: bad reference count for file.\n");
+      exit(1);
+    }
+  }
   //   12. ERROR: directory appears more than once in file system.
   // ------------------------------------------------------------------
 
