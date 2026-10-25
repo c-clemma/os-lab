@@ -125,6 +125,7 @@ int main(int argc, char **argv)
   //
   //   2.  ERROR: bad direct address in inode.
   //       ERROR: bad indirect address in inode.
+  // and  5.
   for (u32 inum = 0; inum < ninodes; inum++)
   {
     dinode *dip = (dinode *)(img + inodestart * BSIZE + inum * sizeof(dinode));
@@ -134,16 +135,38 @@ int main(int argc, char **argv)
       continue;
     }
     // check direct
-    for (u32 i = 0; i < NDIRECT; i++)
+    for (u32 i = 0; i < NDIRECT + 1; i++)
     {
       u32 adr = xint(dip->addrs[i]);
       if (adr == 0)
       {
         continue;
       }
+      // 2.  ERROR: bad direct address in inode.
       if (adr < (xint(sb->size) - xint(sb->nblocks)) || adr >= xint(sb->size))
       {
-        fprintf(stderr, "ERROR: bad direct address in inode.\n");
+        if (i < NDIRECT)
+        {
+          fprintf(stderr, "ERROR: bad direct address in inode.\n");
+          exit(1);
+        }
+        else
+        {
+          fprintf(stderr, "ERROR: bad indirect address in inode.\n");
+          exit(1);
+        }
+      }
+      // 5.  ERROR: address used by inode but marked free in bitmap.
+      // Bitmap is a row of byytes ans every byte has a 8 bits that stand for a block
+      u32 bitmapstart = xint(sb->bmapstart);
+      u8 *bitmap = img + bitmapstart * BSIZE; // pointer to the start of the bitmap
+      u8 byte = bitmap[adr / 8];
+      int mask = (1 << (adr % 8)); // shift index so readable
+      int bit = byte & mask;       // only get 1st bit
+
+      if (bit == 0)
+      {
+        fprintf(stderr, "ERROR: address used by inode but marked free in bitmap.\n");
         exit(1);
       }
     }
@@ -151,11 +174,6 @@ int main(int argc, char **argv)
     u32 adr = xint(dip->addrs[NDIRECT]); // block number
     if (adr != 0)
     {
-      if (adr < (xint(sb->size) - xint(sb->nblocks)) || adr >= xint(sb->size))
-      {
-        fprintf(stderr, "ERROR: bad indirect address in inode.\n");
-        exit(1);
-      }
 
       u32 *indirect = (u32 *)(img + adr * BSIZE); // go to adress = block nr -> actuall adress
       for (u32 i = 0; i < NINDIRECT; i++)
@@ -165,9 +183,23 @@ int main(int argc, char **argv)
         {
           continue;
         }
+        // ERROR: bad indirect address in inode.
         if (inadr < (xint(sb->size) - xint(sb->nblocks)) || inadr >= xint(sb->size))
         {
           fprintf(stderr, "ERROR: bad indirect address in inode.\n");
+          exit(1);
+        }
+        // 5.  ERROR: address used by inode but marked free in bitmap.
+        // Bitmap is a row of byytes ans every byte has a 8 bits that stand for a block
+        u32 bitmapstart = xint(sb->bmapstart);
+        u8 *bitmap = img + bitmapstart * BSIZE; // pointer to the start of the bitmap
+        u8 byte = bitmap[inadr / 8];
+        int mask = (1 << (inadr % 8)); // shift index so readable
+        int bit = byte & mask;         // only get 1st bit
+
+        if (bit == 0)
+        {
+          fprintf(stderr, "ERROR: address used by inode but marked free in bitmap.\n");
           exit(1);
         }
       }
@@ -253,13 +285,14 @@ int main(int argc, char **argv)
     }
   } // maxbe need to itterate through all entries??
 
-  //   5.  ERROR: address used by inode but marked free in bitmap.
+  // 5. see above
 
   //   6.  ERROR: bitmap marks block in use but it is not in use.
   //   7.  ERROR: direct address used more than once.
   //   8.  ERROR: indirect address used more than once.
   //   9.  ERROR: inode marked use but not found in a directory.
   //   10. ERROR: inode referred to in directory but marked free.
+  // -------------------------------------------------------------------------
   //   11. ERROR: bad reference count for file.
   //   12. ERROR: directory appears more than once in file system.
   // ------------------------------------------------------------------
