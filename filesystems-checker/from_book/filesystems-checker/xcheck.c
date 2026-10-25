@@ -122,6 +122,12 @@ int main(int argc, char **argv)
   // list; most of the rest need a first pass to collect information
   // (e.g. the block bitmap, or every address currently in use) before
   // they have anything to compare against.
+  u32 size = xint(sb->size);                      // total blocks in this image
+  u32 nblocks = xint(sb->nblocks);                // number of data blocks
+  u32 start = size - nblocks;                     // blocknumber of first datablock
+  u8 *bitmap = img + xint(sb->bmapstart) * BSIZE; // points to datamap
+  int *used_blocks = calloc(size, sizeof(int));   // build a second bitmap to compare for Test 6
+
   //
   //   2.  ERROR: bad direct address in inode.
   //       ERROR: bad indirect address in inode.
@@ -130,11 +136,12 @@ int main(int argc, char **argv)
   {
     dinode *dip = (dinode *)(img + inodestart * BSIZE + inum * sizeof(dinode));
     u16 type = xshort(dip->type);
-    if (type == 0)
-    { // not used inode
+    // Test for Case 1 could also go here
+    if (type == 0) // not used inode
+    {
       continue;
     }
-    // check direct
+    // check direct blocks
     for (u32 i = 0; i < NDIRECT + 1; i++)
     {
       u32 adr = xint(dip->addrs[i]);
@@ -143,23 +150,42 @@ int main(int argc, char **argv)
         continue;
       }
       // 2.  ERROR: bad direct address in inode.
-      if (adr < (xint(sb->size) - xint(sb->nblocks)) || adr >= xint(sb->size))
+      if (adr < start || adr >= size)
       {
         if (i < NDIRECT)
         {
           fprintf(stderr, "ERROR: bad direct address in inode.\n");
           exit(1);
         }
-        else
+        else // indirect block
         {
           fprintf(stderr, "ERROR: bad indirect address in inode.\n");
           exit(1);
         }
       }
+      // if direct block adresses used before then it is marked in used
+      if (used_blocks[adr] == 1)
+      {
+        //   7.  ERROR: direct address used more than once.
+
+        if (i < NDIRECT)
+        {
+          fprintf(stderr, "ERROR: direct address used more than once.\n");
+          exit(1);
+        }
+        //   8.  ERROR: indirect address used more than once.
+
+        else
+        {
+          fprintf(stderr, "ERROR: indirect address used more than once.\n");
+          exit(1);
+        }
+      }
+      // for 6,7,8:  maked as used
+      used_blocks[adr] = 1;
+
       // 5.  ERROR: address used by inode but marked free in bitmap.
-      // Bitmap is a row of byytes ans every byte has a 8 bits that stand for a block
-      u32 bitmapstart = xint(sb->bmapstart);
-      u8 *bitmap = img + bitmapstart * BSIZE; // pointer to the start of the bitmap
+      // Bitmap is a row of bytes ans every byte has a 8 bits that stand for a block
       u8 byte = bitmap[adr / 8];
       int mask = (1 << (adr % 8)); // shift index so readable
       int bit = byte & mask;       // only get 1st bit
@@ -170,7 +196,7 @@ int main(int argc, char **argv)
         exit(1);
       }
     }
-    // check indirect
+    // check indirect datablocks
     u32 adr = xint(dip->addrs[NDIRECT]); // block number
     if (adr != 0)
     {
@@ -183,16 +209,22 @@ int main(int argc, char **argv)
         {
           continue;
         }
-        // ERROR: bad indirect address in inode.
-        if (inadr < (xint(sb->size) - xint(sb->nblocks)) || inadr >= xint(sb->size))
+        // 2. ERROR: bad indirect address in inode.
+        if (inadr < start || inadr >= size)
         {
           fprintf(stderr, "ERROR: bad indirect address in inode.\n");
           exit(1);
         }
+        //   8.  ERROR: indirect address used more than once.
+        if (used_blocks[inadr] == 1)
+        {
+          fprintf(stderr, "ERROR: indirect address used more than once.\n");
+          exit(1);
+        }
+        // for 6,7,8,:
+        used_blocks[inadr] = 1;
         // 5.  ERROR: address used by inode but marked free in bitmap.
         // Bitmap is a row of byytes ans every byte has a 8 bits that stand for a block
-        u32 bitmapstart = xint(sb->bmapstart);
-        u8 *bitmap = img + bitmapstart * BSIZE; // pointer to the start of the bitmap
         u8 byte = bitmap[inadr / 8];
         int mask = (1 << (inadr % 8)); // shift index so readable
         int bit = byte & mask;         // only get 1st bit
@@ -207,47 +239,6 @@ int main(int argc, char **argv)
   }
 
   //   3.  ERROR: root directory does not exist.
-
-  // TODO: normally . and .. are in the first/second entry of a direcetory and in the first datablock so here hard coded
-  // maybe need to go all direct and indirect blocks and all entrys -> idea in comment, may need to add indirect blocks
-
-  // check inode 1 -> inum = 1 (dinode *dip = (dinode *)(img + inodestart * BSIZE + inum * sizeof(dinode));)
-  /*dinode *dip = (dinode *)(img + inodestart * BSIZE + 1 * sizeof(dinode));
-  u16 type = xshort(dip->type);
-  if (type != T_DIR)
-  { // not a directory
-    fprintf(stderr, "ERROR: root directory does not exist.\n");
-    exit(1);
-  }
-  // check direct
-  int found = 0;
-  for (u32 i = 0; i < NDIRECT && !found; i++)
-  {
-    u32 adr = xint(dip->addrs[i]); // datablock
-    if (adr == 0)
-    {
-      continue;
-    }
-    dirent *dentries = (dirent *)(img + adr * BSIZE); // go to block to access directory entries
-    for (u32 j = 0; j < (BSIZE / sizeof(dirent)); j++)
-    { // go through all 32 entries -> not hard coded!
-      u16 number = xshort(dentries[j].inum);
-      if (number == 0)
-      {
-        continue;
-      }
-      if (strcmp(dentries[j].name, "..") == 0 && number == 1)
-      {
-        found = 1;
-        break;
-      }
-    }
-  }
-  if (!found)
-  {
-    fprintf(stderr, "ERROR: root directory does not exist.\n");
-    exit(1);
-  }*/
 
   dinode *firstdip = (dinode *)(img + inodestart * BSIZE + 1 * sizeof(dinode)); // first inode
   u16 type = xshort(firstdip->type);
@@ -288,11 +279,26 @@ int main(int argc, char **argv)
   // 5. see above
 
   //   6.  ERROR: bitmap marks block in use but it is not in use.
+  // builed "second bitmap" above, now compare
+
+  for (u32 b = start; b < size; b++)
+  {
+    u8 byte = bitmap[b / 8];
+    int mask = (1 << (b % 8));    // shift index so readable
+    int bit = (byte & mask) != 0; // only get 1st bit
+
+    if (bit && !used_blocks[b])
+    {
+      fprintf(stderr, "ERROR: bitmap marks block in use but it is not in use.\n");
+      exit(1);
+    }
+  }
+
   //   7.  ERROR: direct address used more than once.
   //   8.  ERROR: indirect address used more than once.
+
   //   9.  ERROR: inode marked use but not found in a directory.
   //   10. ERROR: inode referred to in directory but marked free.
-  // -------------------------------------------------------------------------
   //   11. ERROR: bad reference count for file.
   //   12. ERROR: directory appears more than once in file system.
   // ------------------------------------------------------------------
@@ -301,3 +307,46 @@ int main(int argc, char **argv)
   munmap(img, statbuf.st_size);
   return 0;
 }
+
+// ----------------------------------------
+
+// TODO: normally . and .. are in the first/second entry of a direcetory and in the first datablock so here hard coded
+// maybe need to go all direct and indirect blocks and all entrys -> idea in comment, may need to add indirect blocks
+
+// check inode 1 -> inum = 1 (dinode *dip = (dinode *)(img + inodestart * BSIZE + inum * sizeof(dinode));)
+/*dinode *dip = (dinode *)(img + inodestart * BSIZE + 1 * sizeof(dinode));
+u16 type = xshort(dip->type);
+if (type != T_DIR)
+{ // not a directory
+  fprintf(stderr, "ERROR: root directory does not exist.\n");
+  exit(1);
+}
+// check direct
+int found = 0;
+for (u32 i = 0; i < NDIRECT && !found; i++)
+{
+  u32 adr = xint(dip->addrs[i]); // datablock
+  if (adr == 0)
+  {
+    continue;
+  }
+  dirent *dentries = (dirent *)(img + adr * BSIZE); // go to block to access directory entries
+  for (u32 j = 0; j < (BSIZE / sizeof(dirent)); j++)
+  { // go through all 32 entries -> not hard coded!
+    u16 number = xshort(dentries[j].inum);
+    if (number == 0)
+    {
+      continue;
+    }
+    if (strcmp(dentries[j].name, "..") == 0 && number == 1)
+    {
+      found = 1;
+      break;
+    }
+  }
+}
+if (!found)
+{
+  fprintf(stderr, "ERROR: root directory does not exist.\n");
+  exit(1);
+}*/
