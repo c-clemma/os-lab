@@ -128,13 +128,14 @@ int main(int argc, char **argv)
   u8 *bitmap = img + xint(sb->bmapstart) * BSIZE; // points to datamap
   int *used_blocks = calloc(size, sizeof(int));   // build a second bitmap to compare for Test 6
   int *referenced_in = calloc(ninodes, sizeof(int));
+  int *named_in = calloc(ninodes, sizeof(int));
   //
   //   2.  ERROR: bad direct address in inode.
   //       ERROR: bad indirect address in inode.
   // and  5.
   for (u32 inum = 0; inum < ninodes; inum++)
   {
-    dinode *dip = (dinode *)(img + inodestart * BSIZE + inum * sizeof(dinode));
+    dinode *dip = (dinode *)(img + inodestart * BSIZE + inum * sizeof(dinode)); // Get the address of the inode data.
     u16 type = xshort(dip->type);
     // Test for Case 1 could also go here
     if (type == 0) // not used inode
@@ -239,7 +240,6 @@ int main(int argc, char **argv)
   }
 
   //   3.  ERROR: root directory does not exist.
-
   dinode *firstdip = (dinode *)(img + inodestart * BSIZE + 1 * sizeof(dinode)); // first inode
   u16 type = xshort(firstdip->type);
   if (type != T_DIR)
@@ -247,10 +247,63 @@ int main(int argc, char **argv)
     fprintf(stderr, "ERROR: root directory does not exist.\n");
     exit(1);
   }
-  u32 adr = xint(firstdip->addrs[0]);               // first datablock
-  dirent *dentries = (dirent *)(img + adr * BSIZE); // go to block to access directory entries
-  u16 number = xshort(dentries[1].inum);            // second entry for ..
-  if (adr == 0 || strcmp(dentries[1].name, "..") != 0 || number != 1)
+  // check direct
+  int found_root = 0;
+  for (u32 i = 0; i < NDIRECT && !found_root; i++)
+  {
+    u32 adr = xint(firstdip->addrs[i]); // datablock
+    if (adr == 0)
+    {
+      continue;
+    }
+    dirent *dentries = (dirent *)(img + adr * BSIZE); // go to block to access directory entries
+    for (u32 j = 0; j < (BSIZE / sizeof(dirent)); j++)
+    { // go through all 32 entries -> not hard coded!
+      u16 number = xshort(dentries[j].inum);
+      if (number == 0)
+      {
+        continue;
+      }
+      if (strncmp(dentries[j].name, "..", DIRSIZ) == 0 && number == 1)
+      {
+        found_root = 1;
+        break;
+      }
+    }
+  }
+  if (!found_root)
+  {
+    u32 adr = xint(firstdip->addrs[NDIRECT]); // block number
+    if (adr != 0)
+    {
+
+      u32 *indirect = (u32 *)(img + adr * BSIZE); // go to adress = block nr -> actuall adress
+      for (u32 i = 0; i < NINDIRECT; i++)
+      {
+        u32 inadr = xint(indirect[i]);
+        if (inadr == 0)
+        {
+          continue;
+        }
+        dirent *dentries = (dirent *)(img + inadr * BSIZE); // go to block to access directory entries
+        for (u32 j = 0; j < (BSIZE / sizeof(dirent)); j++)
+        { // go through all 32 entries -> not hard coded!
+          u16 number = xshort(dentries[j].inum);
+          if (number == 0)
+          {
+            continue;
+          }
+          if (strncmp(dentries[j].name, "..", DIRSIZ) == 0 && number == 1)
+          {
+            found_root = 1;
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  if (!found_root)
   {
     fprintf(stderr, "ERROR: root directory does not exist.\n");
     exit(1);
@@ -265,19 +318,71 @@ int main(int argc, char **argv)
     { // not a directory
       continue;
     }
-    // check first datablock for . and ..
-    u32 adr = xint(dip->addrs[0]);
-    dirent *dentries = (dirent *)(img + adr * BSIZE); // go to block to access directory entries
-    u16 number = xshort(dentries[0].inum);            // inum number for .
-    if (adr == 0 || strcmp(dentries[0].name, ".") != 0 || strcmp(dentries[1].name, "..") != 0 || number != inum)
+    int found_dir = 0;
+    int found_pardir = 0;
+    for (u32 i = 0; i < NDIRECT && (!found_dir || !found_pardir); i++)
+    {
+      u32 adr = xint(dip->addrs[i]); // datablock
+      if (adr == 0)
+      {
+        continue;
+      }
+      dirent *dentries = (dirent *)(img + adr * BSIZE); // go to block to access directory entries
+      for (u32 j = 0; j < (BSIZE / sizeof(dirent)); j++)
+      {
+        u16 number = xshort(dentries[j].inum);
+
+        if (strncmp(dentries[j].name, ".", DIRSIZ) == 0 && number == inum)
+        {
+          found_dir = 1;
+        }
+        if (strncmp(dentries[j].name, "..", DIRSIZ) == 0)
+        {
+          found_pardir = 1;
+        }
+      }
+    }
+    if (!found_dir || !found_pardir)
+    {
+      u32 adr = xint(dip->addrs[NDIRECT]); // block number
+      if (adr != 0)
+      {
+
+        u32 *indirect = (u32 *)(img + adr * BSIZE); // go to adress = block nr -> actuall adress
+        for (u32 i = 0; i < NINDIRECT; i++)
+        {
+          u32 inadr = xint(indirect[i]);
+          if (inadr == 0)
+          {
+            continue;
+          }
+          dirent *dentries = (dirent *)(img + inadr * BSIZE); // go to block to access directory entries
+          for (u32 j = 0; j < (BSIZE / sizeof(dirent)); j++)
+          { // go through all 32 entries -> not hard coded!
+            u16 number = xshort(dentries[j].inum);
+            if (number == 0)
+            {
+              continue;
+            }
+            if (strncmp(dentries[j].name, ".", DIRSIZ) == 0 && number == inum)
+            {
+              found_dir = 1;
+            }
+            if (strncmp(dentries[j].name, "..", DIRSIZ) == 0)
+            {
+              found_pardir = 1;
+            }
+          }
+        }
+      }
+    }
+
+    if (!found_dir || !found_pardir)
     {
       fprintf(stderr, "ERROR: directory not properly formatted.\n");
       exit(1);
     }
-
-    //  9.  ERROR: inode marked use but not found in a directory.
-
-  } // maxbe need to itterate through all entries??
+  }
 
   // 5. see above
 
@@ -303,6 +408,8 @@ int main(int argc, char **argv)
   //   9.  ERROR: inode marked use but not found in a directory.
   //   10. ERROR: inode referred to in directory but marked free.
   //   11. ERROR: bad reference count for file.
+  // -> go through every directory and count for each inode how often it accoursd in dictories
+  //   12. ERROR: directory appears more than once in file system.
   for (u32 inum = 0; inum < ninodes; inum++)
   {
     dinode *dip = (dinode *)(img + inodestart * BSIZE + inum * sizeof(dinode));
@@ -327,6 +434,7 @@ int main(int argc, char **argv)
         {
           continue;
         }
+        // for 10: inode points to number, is it occupied?
         dinode *referenced = (dinode *)(img + inodestart * BSIZE + number * sizeof(dinode));
         u16 ref_type = xshort(referenced->type);
         if (ref_type == 0)
@@ -335,6 +443,10 @@ int main(int argc, char **argv)
           exit(1);
         }
         referenced_in[number]++;
+        if (strncmp(dentries[j].name, ".", DIRSIZ) != 0 && strncmp(dentries[j].name, "..", DIRSIZ) != 0)
+        {
+          named_in[number]++;
+        }
       }
     }
     u32 adr = xint(dip->addrs[NDIRECT]); // block number
@@ -357,11 +469,15 @@ int main(int argc, char **argv)
             continue;
           }
           referenced_in[number]++;
+          if (strncmp(dentries[j].name, ".", DIRSIZ) != 0 && strncmp(dentries[j].name, "..", DIRSIZ) != 0)
+          {
+            named_in[number]++;
+          }
         }
       }
     }
   }
-  // CHECK for 9 & 11:
+  // CHECK for 9 & 11 & 12:
   for (u32 inum = 0; inum < ninodes; inum++)
   {
     dinode *dip = (dinode *)(img + inodestart * BSIZE + inum * sizeof(dinode));
@@ -376,54 +492,19 @@ int main(int argc, char **argv)
       fprintf(stderr, "ERROR: bad reference count for file.\n");
       exit(1);
     }
+    if (xshort(dip->type) == T_DIR && (xshort(dip->nlink) > 1 || named_in[inum] > 1))
+    {
+      fprintf(stderr, "ERROR: directory appears more than once in file system.\n");
+      exit(1);
+    }
   }
-  //   12. ERROR: directory appears more than once in file system.
+
   // ------------------------------------------------------------------
 
   // Unmap the file when we are done with it.
+  free(used_blocks);
+  free(referenced_in);
+  free(named_in);
   munmap(img, statbuf.st_size);
   return 0;
 }
-
-// ----------------------------------------
-
-// TODO: normally . and .. are in the first/second entry of a direcetory and in the first datablock so here hard coded
-// maybe need to go all direct and indirect blocks and all entrys -> idea in comment, may need to add indirect blocks
-
-// check inode 1 -> inum = 1 (dinode *dip = (dinode *)(img + inodestart * BSIZE + inum * sizeof(dinode));)
-/*dinode *dip = (dinode *)(img + inodestart * BSIZE + 1 * sizeof(dinode));
-u16 type = xshort(dip->type);
-if (type != T_DIR)
-{ // not a directory
-  fprintf(stderr, "ERROR: root directory does not exist.\n");
-  exit(1);
-}
-// check direct
-int found = 0;
-for (u32 i = 0; i < NDIRECT && !found; i++)
-{
-  u32 adr = xint(dip->addrs[i]); // datablock
-  if (adr == 0)
-  {
-    continue;
-  }
-  dirent *dentries = (dirent *)(img + adr * BSIZE); // go to block to access directory entries
-  for (u32 j = 0; j < (BSIZE / sizeof(dirent)); j++)
-  { // go through all 32 entries -> not hard coded!
-    u16 number = xshort(dentries[j].inum);
-    if (number == 0)
-    {
-      continue;
-    }
-    if (strcmp(dentries[j].name, "..") == 0 && number == 1)
-    {
-      found = 1;
-      break;
-    }
-  }
-}
-if (!found)
-{
-  fprintf(stderr, "ERROR: root directory does not exist.\n");
-  exit(1);
-}*/
