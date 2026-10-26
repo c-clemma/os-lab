@@ -398,6 +398,9 @@ int main(int argc, char **argv)
   // Unmap the file when we are done with it.
   munmap(img, statbuf.st_size);
   return 0;
+  free(used_blocks);
+  free(referenced_in);
+  free(named_in);
 }
 
 // ----------------------------------------
