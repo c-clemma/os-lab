@@ -128,14 +128,14 @@ int main(int argc, char **argv)
   u8 *bitmap = img + xint(sb->bmapstart) * BSIZE; // points to datamap
   int *used_blocks = calloc(size, sizeof(int));   // build a second bitmap to compare for Test 6
   int *referenced_in = calloc(ninodes, sizeof(int));
-  int *named_in = calloc(ninodes,sizeof(int));
+  int *named_in = calloc(ninodes, sizeof(int));
   //
   //   2.  ERROR: bad direct address in inode.
   //       ERROR: bad indirect address in inode.
   // and  5.
   for (u32 inum = 0; inum < ninodes; inum++)
   {
-    dinode *dip = (dinode *)(img + inodestart * BSIZE + inum * sizeof(dinode));
+    dinode *dip = (dinode *)(img + inodestart * BSIZE + inum * sizeof(dinode)); // Get the address of the inode data.
     u16 type = xshort(dip->type);
     // Test for Case 1 could also go here
     if (type == 0) // not used inode
@@ -276,8 +276,6 @@ int main(int argc, char **argv)
       exit(1);
     }
 
-    //  9.  ERROR: inode marked use but not found in a directory.
-
   } // maxbe need to itterate through all entries??
 
   // 5. see above
@@ -304,6 +302,7 @@ int main(int argc, char **argv)
   //   9.  ERROR: inode marked use but not found in a directory.
   //   10. ERROR: inode referred to in directory but marked free.
   //   11. ERROR: bad reference count for file.
+  // -> go through every directory and count for each inode how often it accoursd in dictories
   //   12. ERROR: directory appears more than once in file system.
   for (u32 inum = 0; inum < ninodes; inum++)
   {
@@ -329,6 +328,7 @@ int main(int argc, char **argv)
         {
           continue;
         }
+        // for 10: inode points to number, is it occupied?
         dinode *referenced = (dinode *)(img + inodestart * BSIZE + number * sizeof(dinode));
         u16 ref_type = xshort(referenced->type);
         if (ref_type == 0)
@@ -337,7 +337,7 @@ int main(int argc, char **argv)
           exit(1);
         }
         referenced_in[number]++;
-        if (strncmp(dentries[j].name,".",DIRSIZ) !=0 && strncmp(dentries[j].name,"..",DIRSIZ) !=0)
+        if (strncmp(dentries[j].name, ".", DIRSIZ) != 0 && strncmp(dentries[j].name, "..", DIRSIZ) != 0)
         {
           named_in[number]++;
         }
@@ -363,7 +363,7 @@ int main(int argc, char **argv)
             continue;
           }
           referenced_in[number]++;
-          if (strncmp(dentries[j].name,".",DIRSIZ) !=0 && strncmp(dentries[j].name,"..",DIRSIZ) !=0)
+          if (strncmp(dentries[j].name, ".", DIRSIZ) != 0 && strncmp(dentries[j].name, "..", DIRSIZ) != 0)
           {
             named_in[number]++;
           }
